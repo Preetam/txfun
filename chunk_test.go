@@ -41,8 +41,8 @@ func TestChunk(t *testing.T) {
 	bList := newList()
 
 	for i := 0; i < N; i++ {
-		aList.insert([]byte(fmt.Sprint(i)), []byte(fmt.Sprint(N-i)))
-		bList.insert([]byte(fmt.Sprint(i*2)), []byte(fmt.Sprint(N-i*2)))
+		aList.insert([]byte(fmt.Sprint(i*2)), []byte(fmt.Sprint(N-i)))
+		bList.insert([]byte(fmt.Sprint(i*2+1)), []byte(fmt.Sprint(N-i*2)))
 	}
 
 	for n := aList.root; n != nil; n = n.next {

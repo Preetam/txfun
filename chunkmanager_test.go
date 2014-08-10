@@ -7,5 +7,15 @@ import (
 )
 
 func TestChunkManager(t *testing.T) {
-	t.Log(newChunkManager(filepath.Join(os.TempDir(), "chunks")))
+	cm, err := newChunkManager(filepath.Join(os.TempDir(), "chunks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reader := cm.newChunkReader(2)
+	cur := reader.newCursor()
+
+	for cur.Next() {
+		t.Log(string(cur.key), string(cur.value))
+	}
 }

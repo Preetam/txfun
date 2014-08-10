@@ -34,7 +34,6 @@ func newChunkManager(path string) (*chunkmanager, error) {
 			fmt.Sscanf(chunkEpochStr, "%d", &epoch)
 
 			if epoch > 0 {
-				fmt.Printf("Found chunk %d\n", epoch)
 				chunk, err := openChunk(path, name)
 				if err != nil {
 					return nil, err
@@ -54,6 +53,19 @@ func newChunkManager(path string) (*chunkmanager, error) {
 	}
 
 	return cm, nil
+}
+
+func (cm *chunkmanager) newChunkReader(epoch uint64) *chunkreader {
+	var chunks []*chunk
+	for _, chunk := range cm.chunks {
+		if chunk.epoch <= epoch {
+			chunks = append(chunks, chunk)
+		}
+	}
+
+	return &chunkreader{
+		chunks: chunks,
+	}
 }
 
 func (cm *chunkmanager) String() string {
