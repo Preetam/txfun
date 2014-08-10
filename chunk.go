@@ -3,7 +3,10 @@ package txfun
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 const (
@@ -11,11 +14,45 @@ const (
 )
 
 type chunk struct {
-	file *os.File
+	epoch     uint64
+	writeable bool
+	file      *os.File
+}
+
+func openChunk(path, file string) (*chunk, error) {
+	chunkEpochStr := strings.TrimSuffix(file, ".chunk")
+	epoch := uint64(0)
+	fmt.Sscanf(chunkEpochStr, "%d", &epoch)
+	f, err := os.Open(filepath.Join(path, file))
+	if err != nil {
+		return nil, err
+	}
+
+	return &chunk{
+		epoch:     epoch,
+		file:      f,
+		writeable: false,
+	}, nil
+}
+
+func createChunk(path string, epoch uint64) (*chunk, error) {
+	filename := filepath.Join(path, fmt.Sprintf("%d.chunk", epoch))
+	f, err := os.Create(filename)
+	if err != nil {
+		return nil, err
+	}
+	return &chunk{
+		epoch:     epoch,
+		file:      f,
+		writeable: true,
+	}, nil
 }
 
 type chunkCursor struct {
-	file *os.File
+	file  *os.File
+	key   []byte
+	value []byte
+	valid bool
 }
 
 type record struct {
@@ -71,6 +108,8 @@ func (c *chunk) NewCursor() *chunkCursor {
 	}
 
 	cur.file.Seek(0, 0)
+	cur.readRecord()
+
 	return cur
 }
 
@@ -84,15 +123,17 @@ func (cur *chunkCursor) readRecord() record {
 	cur.file.Read(rec.key)
 	cur.file.Read(rec.value)
 	cur.file.Seek(-int64(len(rec.key)+len(rec.value)+8), 1)
+
+	cur.key = rec.key
+	cur.value = rec.value
+	cur.valid = rec.magic == RECORD_MAGIC
+
 	return rec
 }
 
 func (cur *chunkCursor) next() {
-	rec := record{}
-	binary.Read(cur.file, binary.BigEndian, &rec.magic)
-	binary.Read(cur.file, binary.BigEndian, &rec.keylen)
-	binary.Read(cur.file, binary.BigEndian, &rec.vallen)
-	cur.file.Seek(int64(rec.keylen)+int64(rec.vallen), 1)
+	cur.file.Seek(8+int64(len(cur.key)+len(cur.value)), 1)
+	cur.readRecord()
 }
 
 func mergeChunks(a, b, dest *chunk) {
@@ -100,37 +141,34 @@ func mergeChunks(a, b, dest *chunk) {
 	bCur := b.NewCursor()
 
 	for {
-		aRec := aCur.readRecord()
-		bRec := bCur.readRecord()
-
-		if aRec.magic != RECORD_MAGIC {
-			if bRec.magic != RECORD_MAGIC {
+		if !aCur.valid {
+			if !bCur.valid {
 				break
 			}
 
-			dest.WriteRecord(createRecord(bRec.key, bRec.value))
+			dest.WriteRecord(createRecord(bCur.key, bCur.value))
 			bCur.next()
 
 			continue
 		}
 
-		if bRec.magic != RECORD_MAGIC {
-			dest.WriteRecord(createRecord(aRec.key, aRec.value))
+		if !bCur.valid {
+			dest.WriteRecord(createRecord(aCur.key, aCur.value))
 			aCur.next()
 
 			continue
 		}
 
-		cmp := bytes.Compare(aRec.key, bRec.key)
+		cmp := bytes.Compare(aCur.key, bCur.key)
 		switch {
 		case cmp < 0:
-			dest.WriteRecord(createRecord(aRec.key, aRec.value))
+			dest.WriteRecord(createRecord(aCur.key, aCur.value))
 			aCur.next()
 		case cmp > 0:
-			dest.WriteRecord(createRecord(bRec.key, bRec.value))
+			dest.WriteRecord(createRecord(bCur.key, bCur.value))
 			bCur.next()
 		case cmp == 0:
-			dest.WriteRecord(createRecord(bRec.key, bRec.value))
+			dest.WriteRecord(createRecord(bCur.key, bCur.value))
 			aCur.next()
 			bCur.next()
 		}
