@@ -3,7 +3,10 @@ package txfun
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 const (
@@ -11,11 +14,45 @@ const (
 )
 
 type chunk struct {
-	file *os.File
+	epoch     uint64
+	writeable bool
+	file      *os.File
+}
+
+func openChunk(path, file string) (*chunk, error) {
+	chunkEpochStr := strings.TrimSuffix(file, ".chunk")
+	epoch := uint64(0)
+	fmt.Println(chunkEpochStr)
+	fmt.Sscanf(chunkEpochStr, "%d", &epoch)
+	f, err := os.Open(filepath.Join(path, file))
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println(epoch)
+	return &chunk{
+		epoch:     epoch,
+		file:      f,
+		writeable: false,
+	}, nil
+}
+
+func createChunk(path string, epoch uint64) (*chunk, error) {
+	filename := filepath.Join(path, fmt.Sprintf("%d.chunk", epoch))
+	f, err := os.Create(filename)
+	if err != nil {
+		return nil, err
+	}
+	return &chunk{
+		epoch:     epoch,
+		file:      f,
+		writeable: true,
+	}, nil
 }
 
 type chunkCursor struct {
-	file *os.File
+	file  *os.File
+	key   []byte
+	value []byte
 }
 
 type record struct {
@@ -84,6 +121,10 @@ func (cur *chunkCursor) readRecord() record {
 	cur.file.Read(rec.key)
 	cur.file.Read(rec.value)
 	cur.file.Seek(-int64(len(rec.key)+len(rec.value)+8), 1)
+
+	cur.key = rec.key
+	cur.value = rec.value
+
 	return rec
 }
 
