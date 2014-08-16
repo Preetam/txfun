@@ -1,47 +1,85 @@
 package txfun
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/boltdb/bolt"
 )
+
+func printState(db *bolt.DB) {
+	db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket([]byte("data")).Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			fmt.Println(string(k), "=>", string(v))
+		}
+		return nil
+	})
+}
 
 func Test1(t *testing.T) {
 	db, _ := NewDB()
 	tx := db.Begin()
 
 	tx.Set([]byte("foo"), []byte("bar"))
-	tx.Get([]byte("foo"))
 
-	tx.Commit()
+	err := tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println("We should just see `foo => bar`")
+	printState(db.state)
 
 	tx = db.Begin()
 	val, err := tx.Get([]byte("foo"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log(string(val))
-	tx.Set([]byte("foo"), append(val, []byte("baz")...))
-	t.Log(db.state)
+	if bytes.Compare(val, []byte("bar")) != 0 {
+		t.Fatalf("Expected %v, got %v", string([]byte("bar")), val)
+	}
+
+	// Why would this cause a panic?
+	//tx.Set([]byte("foo"), append(val, []byte("baz")...))
+
+	fmt.Println("We should just see `foo => bar`")
+	printState(db.state)
 	tx.Commit()
-	t.Log(db.state)
+	fmt.Println("We should just see `foo => bar`")
+	printState(db.state)
 
 	txA := db.Begin()
 	txB := db.Begin()
 
-	t.Log(db.state)
+	fmt.Println("We should just see `foo => bar`")
+	printState(db.state)
 	txA.Set([]byte("some_key"), []byte("a"))
 	txA.Commit()
-	t.Log(db.state)
+
+	fmt.Println("We should now also see `some_key => a`")
+	printState(db.state)
+
 	txB.Set([]byte("some_key"), []byte("b"))
-	t.Log(db.state)
+
+	fmt.Println("Same thing again")
+	printState(db.state)
+
 	t.Log(txB.Commit())
-	t.Log(db.state)
+
+	fmt.Println("We should see the same thing because there was a conflict")
+	printState(db.state)
+
+	fmt.Println("We should now see `some_key => b` because we're retrying")
 	t.Log(txB.Commit())
-	t.Log(db.state)
+	printState(db.state)
+
+	db.state.Close()
 }
 
 func TestConcurrent(t *testing.T) {
@@ -88,8 +126,17 @@ func TestConcurrent(t *testing.T) {
 
 	wg.Wait()
 
-	for n := db.state.root; n != nil; n = n.next {
-		keys[string(n.key)] = true
+	err := db.state.View(func(boltTx *bolt.Tx) error {
+		c := boltTx.Bucket([]byte("data")).Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			keys[string(k)] = true
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	for key, val := range keys {
