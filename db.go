@@ -1,21 +1,43 @@
 package txfun
 
 import (
+	"github.com/boltdb/bolt"
+
+	"encoding/binary"
+	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 )
 
 type DB struct {
-	state    *list
+	state    *bolt.DB
 	lock     sync.Mutex
 	epoch    uint64
 	inflight map[uint32]*Tx
 }
 
 func NewDB() (*DB, error) {
+	boltdb, err := bolt.Open("/tmp/bolt.db", 0600, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	err = boltdb.Update(func(tx *bolt.Tx) error {
+		meta, err := tx.CreateBucketIfNotExists([]byte("meta"))
+		if err != nil {
+			return err
+		}
+
+		buf := make([]byte, 8)
+		binary.LittleEndian.PutUint64(buf, 1)
+
+		err = meta.Put([]byte("epoch"), buf)
+		return err
+	})
+
 	return &DB{
-		state:    newList(),
+		state:    boltdb,
 		lock:     sync.Mutex{},
 		epoch:    1,
 		inflight: make(map[uint32]*Tx),
@@ -31,10 +53,15 @@ func (db *DB) Begin() *Tx {
 	for _, present := db.inflight[id]; present; id = rand.Uint32() {
 	}
 
+	boltTx, err := db.state.Begin(false)
+	if err != nil {
+		log.Print(err)
+	}
+
 	tx := &Tx{
 		id:          id,
 		db:          db,
-		epoch:       db.epoch,
+		view:        boltTx,
 		state:       newList(),
 		keysWritten: make(map[string]struct{}),
 	}
@@ -45,20 +72,37 @@ func (db *DB) Begin() *Tx {
 
 func (db *DB) commitTx(tx *Tx) error {
 	if tx.conflicted {
-		tx.epoch = db.epoch
 		tx.conflicted = false
 		tx.commits = tx.commits[:0]
+		tx.view.Commit()
+		boltTx, _ := db.state.Begin(false)
+		tx.view = boltTx
 		return ErrConflict
 	}
 
 	db.lock.Lock()
 
-	for n := tx.state.root; n != nil; n = n.next {
-		newNode := db.state.insert(n.key, n.value)
-		newNode.created = db.epoch
-	}
+	err := db.state.Update(func(boltTx *bolt.Tx) error {
+		b, err := boltTx.CreateBucketIfNotExists([]byte("data"))
+		if err != nil {
+			return err
+		}
+
+		for n := tx.state.root; n != nil; n = n.next {
+			err = b.Put(n.key, n.value)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 
 	db.lock.Unlock()
+
+	if err != nil {
+		return err
+	}
 
 	for id, inflightTx := range db.inflight {
 		if id == tx.id {

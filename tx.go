@@ -3,6 +3,8 @@ package txfun
 import (
 	"bytes"
 	"errors"
+
+	"github.com/boltdb/bolt"
 )
 
 var (
@@ -14,7 +16,7 @@ var (
 type Tx struct {
 	id          uint32
 	db          *DB
-	epoch       uint64
+	view        *bolt.Tx
 	state       *list
 	conflicted  bool
 	keysWritten map[string]struct{}
@@ -54,15 +56,17 @@ func (tx *Tx) Get(key []byte) ([]byte, error) {
 		}
 	}
 
-	for n := tx.db.state.root; n != nil; n = n.next {
-		if n.created > tx.epoch {
-			continue
-		}
+	bucket := tx.view.Bucket([]byte("data"))
+	if bucket == nil {
+		return nil, ErrNotFound
+	}
 
-		cmp := bytes.Compare(key, n.key)
+	c := bucket.Cursor()
+	for k, v := c.First(); k != nil; k, v = c.Next() {
+		cmp := bytes.Compare(key, k)
 		switch {
 		case cmp == 0:
-			return n.value, nil
+			return v, nil
 		case cmp > 0:
 			break
 		}
