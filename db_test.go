@@ -85,7 +85,7 @@ func Test1(t *testing.T) {
 func TestConcurrent(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	const N = 50 // # goroutines
+	const N = 55 // # goroutines
 	var cases []map[string]bool
 	keys := map[string]bool{}
 
@@ -106,6 +106,8 @@ func TestConcurrent(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		wg.Add(1)
+
+		time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
 		go func(n int) {
 			tx := db.Begin()
 			t.Logf("[tx %d] starting tx", tx.id)

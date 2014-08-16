@@ -24,6 +24,7 @@ type Tx struct {
 }
 
 func (tx *Tx) Rollback() {
+	tx.view.Commit()
 }
 
 func (tx *Tx) Commit() error {
