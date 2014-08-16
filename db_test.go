@@ -3,6 +3,7 @@ package txfun
 import (
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -44,6 +45,8 @@ func Test1(t *testing.T) {
 }
 
 func TestConcurrent(t *testing.T) {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
 	const N = 50 // # goroutines
 	var cases []map[string]bool
 	keys := map[string]bool{}

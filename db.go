@@ -52,12 +52,13 @@ func (db *DB) commitTx(tx *Tx) error {
 	}
 
 	db.lock.Lock()
-	defer db.lock.Unlock()
 
 	for n := tx.state.root; n != nil; n = n.next {
 		newNode := db.state.insert(n.key, n.value)
 		newNode.created = db.epoch
 	}
+
+	db.lock.Unlock()
 
 	for id, inflightTx := range db.inflight {
 		if id == tx.id {
